@@ -19,7 +19,15 @@ function show_usage {
   echo "RoK screen sharing tool. "
 }
 
+function log {
+  if [[ "$VERBOSE" == "YES" ]]; then
+    echo "$1"
+  fi
+}
 function take_screenshot {
+  if [[ -e "$1" ]]; then
+    /bin/rm "$1"
+  fi
   /usr/bin/scrot "$1"
 }
 
@@ -30,43 +38,102 @@ function click_mouse {
 }
 
 function copy_name {
-  echo "XYZZY" | xclip -i
+  
+  # Set the clipboard to something invalud
+  echo "no-governor" | xclip -i
+
+  # Click top copy the governor name to the clipboard
   click_mouse ${GOVNAME[0]} ${GOVNAME[1]}
-  GOV_NAME=$(xclip -o)
-  ZZ=0
-  while [[ "$GOV_NAME" == "XYZZY" ]]; do
+  GOVERNOR_NAME=$(xclip -o)
+  WAIT=0
+  FAILSAFE=0
+  # Keep trying until we have a governor name
+  while [[ "$GOVERNOR_NAME" == "no-governor" ]]; do
     sleep 0.25
-    GOV_NAME=$(xclip -o)
-    ZZ=$((ZZ+1))
-    if [[ "$ZZ" == "6" ]]; then
-      echo "Didn't get governor name, clicking again"
+    GOVERNOR_NAME=$(xclip -o)
+    WAIT=$((WAIT+1))
+    FAILSAFE=$((FAILSAFE+1))
+    # If after 1 second, we still don't have a name, click again
+    if [[ "$WAIT" == "4" ]]; then
+      log "Didn't get governor name after 1 second, clicking again."
       click_mouse ${GOVNAME[0]} ${GOVNAME[1]}
-      ZZ=0
+      WAIT=0
+    fi
+    # Failsafe: after 5 seconds, something horrible went wrong
+    if [[ "$FAILSAFE" == "20" ]]; then
+      log "Didn't get governor name after 5 second. Triggering Failsafe."
+      GOVERNOR_NAME="failsafe-triggered"
+      return
     fi
   done
 }
 
-function capture_governor {
-  GOV_X=$1
-  GOV_Y=$2
-  
+function click_and_compare {
+  # Grab "before" screenshot
+  take_screenshot "temp1.png"
+
   # Open the governor
-  click_mouse $GOV_X $GOV_Y 
+  click_mouse $1 $2
+  # sleep a long time before getting the second screenshot
+  sleep 1
+
+  # Grab "before" screenshot
+  take_screenshot "temp2.png"
+  sleep .25 
+
+  # Use some image magick (get it??) to determine if the images are different
+  IMAGE_CHANGE=$(/usr/bin/compare -metric MAE temp1.png temp2.png null: 2>&1 | cut -f 1 -d ' ' | cut -f 1 -d '.' )
+  log "Image Changed by a factor of ${IMAGE_CHANGE}"
+
+  if [[ "$IMAGE_CHANGE" -lt "2000" ]]; then
+    CONTINUE=NO
+  else
+    CONTINUE=YES
+  fi
+}
+
+function capture_governor {
+  CONTINUE=""
+  # Open the governor info window, but try to 
+  # detect if it actually changed
+  click_and_compare $1 $2
+  if [[ "$CONTINUE" == "NO" ]]; then
+    echo "Trying again for the governor second from the bottom."
+    click_and_compare ${G999[0]} ${G999[1]}
+
+    if [[ "$CONTINUE" == "NO" ]]; then
+      echo "Trying again for the governor at the bottom." 
+      click_and_compare ${G1000[0]} ${G1000[1]}
+
+      if [[ "$CONTINUE" == "NO" ]]; then
+        echo "Could not continue. Three governors in a row were unclickable."
+        exit
+      fi
+    fi
+  fi
 
   # Copy the governor name to the clipboard
   copy_name
-  take_screenshot "$GOV_NAME--1.png"
+  log "Using Governor name '$GOVERNOR_NAME'."
+  take_screenshot "$GOVERNOR_NAME--1.png"
 
   # Open More Info
   click_mouse ${MORE[0]} ${MORE[1]} 
-  take_screenshot "$GOV_NAME--2.png"
+  take_screenshot "$GOVERNOR_NAME--2.png"
+  sleep 0.5
 
   # Open Kill Points
   click_mouse ${KPOINTS[0]} ${KPOINTS[1]} 
-  take_screenshot "$GOV_NAME--3.png"
+  take_screenshot "$GOVERNOR_NAME--3.png"
+  sleep 0.5
   
-  click_mouse ${CMORE[0]} ${CMORE[1]}  # Close More Info
-  click_mouse ${CGOV[0]} ${CGOV[1]}  # Close Governor
+  # Close More Info
+  click_mouse ${CMORE[0]} ${CMORE[1]}
+  sleep 0.5
+
+  # Close Governor Profile
+  click_mouse ${CGOV[0]} ${CGOV[1]}
+  sleep 0.5
 }
 
 function select_window {
